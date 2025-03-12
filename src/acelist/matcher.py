@@ -1,4 +1,5 @@
 """Matcher module. Links a M3U8 playlist with an XMLTV file."""
+
 from __future__ import annotations
 
 from asyncio import Lock, Condition, Event
@@ -172,7 +173,9 @@ class Matcher:
         async with self._lock:
             return self._processed_playlist
 
-    async def update_segments(self, cleanup_title: list[re.Pattern], cutoff: float = 0.95) -> None:
+    async def update_segments(
+        self, cleanup_title: list[re.Pattern], cutoff: float = 0.95
+    ) -> None:
         logging.info("Updating segments")
         async with self._lock:
             ready = self._cached_channels_changed and self._cached_playlist_changed
@@ -181,7 +184,8 @@ class Matcher:
             logging.info("Waiting for channels and playlist")
             async with self._cond:
                 await self._cond.wait_for(
-                    lambda: self._cached_channels_changed and self._cached_playlist_changed
+                    lambda: self._cached_channels_changed
+                    and self._cached_playlist_changed
                 )
             logging.info("Got channels and playlist")
 
@@ -198,14 +202,20 @@ class Matcher:
             # Look for the closest match with the available channel names
             for channel in channels.findall("channel"):
                 if difflib.get_close_matches(
-                    segment.title, [c.text for c in channel.findall("display-name")], cutoff=cutoff
+                    segment.title,
+                    [c.text for c in channel.findall("display-name")],
+                    cutoff=cutoff,
                 ):
-                    logging.info("%s -> %s", segment.title, channel.find("display-name").text)
+                    logging.info(
+                        "%s -> %s", segment.title, channel.find("display-name").text
+                    )
                     seg_match = channel.get("id")
                     break
             else:
                 logging.info(
-                    "Could not match %r to any channel (cleaned: %r)", segment.title, segment.title
+                    "Could not match %r to any channel (cleaned: %r)",
+                    segment.title,
+                    segment.title,
                 )
                 continue
 
