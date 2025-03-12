@@ -16,31 +16,39 @@ async def _playlist_updater(uri: str, interval: int, matcher: Matcher):
     self = asyncio.current_task()
     session = aiohttp.ClientSession()
     while not self.cancelled():
-        async with session.get(uri) as response:
-            logging.info("Updating playlist, res: %s", response)
-            res = await response.text()
-            # logging.info(res)
-            await matcher.set_playlist(res)
-        await asyncio.sleep(interval)
-    logging.info("Playlist updater cancelled")
-    session.close()
+        try:
+            async with session.get(uri) as response:
+                logging.debug("Updating playlist, res: %s", response)
+                res = await response.text()
+                await matcher.set_playlist(res)
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logging.error("Error updating playlist: %s", e, exc_info=e)
+    logging.info("Playlist updater finished")
+    await session.close()
 
 
 async def _channels_updater(uri: str, interval: int, matcher: Matcher):
     self = asyncio.current_task()
     session = aiohttp.ClientSession()
     while not self.cancelled():
-        async with session.get(uri) as response:
-            logging.info("Updating channels, res: %s", response)
-            res = await response.content.read()
-            # logging.info(res)
-            try:
-                await matcher.set_channels(res)
-            except Exception as e:
-                logging.error("Error setting channels: %s", e, exc_info=e)
-        await asyncio.sleep(interval)
-    logging.info("Channels updater cancelled")
-    session.close()
+        try:
+            async with session.get(uri) as response:
+                logging.debug("Updating channels, res: %s", response)
+                res = await response.content.read()
+                try:
+                    await matcher.set_channels(res)
+                except Exception as e:
+                    logging.error("Error setting channels: %s", e, exc_info=e)
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logging.error("Error updating channels: %s", e, exc_info=e)
+    logging.info("Channels updater finished")
+    await session.close()
 
 
 async def _segments_updater(
@@ -48,9 +56,14 @@ async def _segments_updater(
 ):
     self = asyncio.current_task()
     while not self.cancelled():
-        logging.info("Updating segments")
-        await matcher.update_segments(cleanup_re, cutoff)
-    logging.info("Segments updater cancelled")
+        try:
+            logging.debug("Updating segments")
+            await matcher.update_segments(cleanup_re, cutoff)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logging.error("Error updating segments: %s", e, exc_info=e)
+    logging.info("Segments updater finished")
 
 
 async def updater(

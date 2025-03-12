@@ -25,7 +25,7 @@ def modify_m3u8_uri(
     unique_id: bool = True,
     new_scheme: str = "http",
     new_host: str = "localhost",
-    new_port: int = 6878
+    new_port: int = 6878,
 ) -> M3U8:
     for seg in playlist.segments:
         if not seg.uri:

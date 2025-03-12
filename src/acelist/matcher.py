@@ -1,8 +1,10 @@
 """Matcher module. Links a M3U8 playlist with an XMLTV file."""
+
 from __future__ import annotations
 
 from asyncio import Lock, Condition, Event
 from copy import copy
+from datetime import datetime, UTC
 from enum import StrEnum
 from lxml.etree import XMLParser, fromstring
 from m3u8 import M3U8, protocol
@@ -109,58 +111,63 @@ def dumps(iptv: M3U8) -> str:
 
 class Matcher:
     def __init__(self) -> None:
-        self._cached_playlist: M3U8 | None = None
-        self._cached_playlist_changed: bool = False
-        self._cached_channels: Element | None = None
-        self._cached_channels_changed: bool = False
+        self._playlist: M3U8 | None = None
+        self._playlist_changed: bool = False
+        self._cached_playlist: int = 0
+        self._channels: Element | None = None
+        self._channels_changed: bool = False
+        self._cached_channels: int = 0
         self._processed_playlist: M3U8 | None = None
         self._parser = XMLParser(recover=True)
 
         self._lock = Lock()
         self._cond = Condition()
         self._processing_done = Event()
+        self._first = True
 
     async def get_playlist(self) -> M3U8 | None:
         async with self._lock:
-            if self._cached_playlist_changed:
-                self._cached_playlist_changed = False
+            if self._playlist_changed:
+                self._playlist_changed = False
 
-            return self._cached_playlist
+            return self._playlist
 
     async def set_playlist(self, content: str) -> None:
-        logging.info("Setting playlist")
+        logging.debug("Setting playlist")
         async with self._lock:
-            playlist = m3u8.loads(content, custom_tags_parser=parse_iptv_attributes)
-            logging.info("loaded playlist %s", playlist)
-            if playlist == self._cached_playlist:
+            if hash(content) == self._cached_playlist:
                 return
-            logging.info("playlist changed")
-            self._cached_playlist = playlist
-            self._cached_playlist_changed = True
+            self._cached_playlist = hash(content)
+            playlist = m3u8.loads(content, custom_tags_parser=parse_iptv_attributes)
+            logging.debug("loaded playlist %s (%d)", playlist, self._cached_playlist)
+            logging.debug("Detected playlist change")
+            self._playlist = playlist
+            self._playlist_changed = True
             async with self._cond:
-                logging.info("playlist notifying")
+                logging.debug("playlist notifying")
                 self._cond.notify_all()
 
     async def get_channels(self) -> Element | None:
         async with self._lock:
-            if self._cached_channels_changed:
-                self._cached_channels_changed = False
+            if self._channels_changed:
+                self._channels_changed = False
 
-            return self._cached_channels
+            return self._channels
 
     async def set_channels(self, content: bytes) -> None:
-        logging.info("Setting channels")
+        logging.debug("Setting channels")
         async with self._lock:
-            logging.info("parsing channels, parser: %s", self._parser)
-            channels = fromstring(content, self._parser)
-            logging.info("loaded channels %s", channels)
-            if channels == self._cached_channels:
+            if hash(content) == self._cached_channels:
                 return
-            logging.info("channels changed")
-            self._cached_channels = channels
-            self._cached_channels_changed = True
+            self._cached_channels = hash(content)
+            logging.debug("parsing channels, parser: %s", self._parser)
+            channels = fromstring(content, self._parser)
+            logging.debug("loaded channels %s (%d)", channels, self._cached_channels)
+            logging.debug("Detected channels change")
+            self._channels = channels
+            self._channels_changed = True
             async with self._cond:
-                logging.info("channels notifying")
+                logging.debug("channels notifying")
                 self._cond.notify_all()
 
     @property
@@ -172,22 +179,31 @@ class Matcher:
         async with self._lock:
             return self._processed_playlist
 
-    async def update_segments(self, cleanup_title: list[re.Pattern], cutoff: float = 0.95) -> None:
-        logging.info("Updating segments")
+    def _should_process_segments(self) -> bool:
+        if self._first:
+            return self._channels_changed and self._playlist_changed
+        return self._playlist_changed or self._channels_changed
+
+    async def update_segments(
+        self, cleanup_title: list[re.Pattern], cutoff: float = 0.95
+    ) -> None:
+        logging.debug("Updating segments")
+        wait_start = datetime.now(tz=UTC)
         async with self._lock:
-            ready = self._cached_channels_changed and self._cached_playlist_changed
+            ready = self._should_process_segments()
 
         if not ready:
-            logging.info("Waiting for channels and playlist")
+            logging.debug("Waiting for channels and playlist")
             async with self._cond:
-                await self._cond.wait_for(
-                    lambda: self._cached_channels_changed and self._cached_playlist_changed
-                )
-            logging.info("Got channels and playlist")
+                await self._cond.wait_for(self._should_process_segments)
+        self._first = False
+        wait_end = datetime.now(tz=UTC)
+        logging.info("Channels/playlists changed after %s", wait_end - wait_start)
 
+        processing_start = datetime.now(tz=UTC)
         processed = copy(await self.get_playlist())
         channels = await self.get_channels()
-        logging.info("Processing segments")
+        logging.info("Starting to process segments...")
         for segment in processed.segments:
             seg_match = None
             # Clean-up the title
@@ -198,21 +214,28 @@ class Matcher:
             # Look for the closest match with the available channel names
             for channel in channels.findall("channel"):
                 if difflib.get_close_matches(
-                    segment.title, [c.text for c in channel.findall("display-name")], cutoff=cutoff
+                    segment.title,
+                    [c.text for c in channel.findall("display-name")],
+                    cutoff=cutoff,
                 ):
-                    logging.info("%s -> %s", segment.title, channel.find("display-name").text)
+                    logging.debug(
+                        "%s -> %s", segment.title, channel.find("display-name").text
+                    )
                     seg_match = channel.get("id")
                     break
             else:
-                logging.info(
-                    "Could not match %r to any channel (cleaned: %r)", segment.title, segment.title
+                logging.debug(
+                    "Could not match %r to any channel (cleaned: %r)",
+                    segment.title,
+                    segment.title,
                 )
                 continue
 
             # Save the match
             segment.custom_parser_values[StateAttrs.EXTINF]["tvg-id"] = seg_match
 
-        logging.info("Segments processed")
+        processing_end = datetime.now(tz=UTC)
+        logging.info("Segments processed after %s", processing_end - processing_start)
         async with self._lock:
             self._processed_playlist = processed
         self._processing_done.set()

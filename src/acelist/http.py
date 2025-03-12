@@ -36,6 +36,7 @@ class WebServer:
             description=description,
             license_info=license,
             contact=authors,
+            terms_of_service=url,
             lifespan=self.lifespan,
         )
         self._app.add_api_route("/", self._root_handler)
