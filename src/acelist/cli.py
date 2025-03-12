@@ -31,7 +31,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--cleanup-re", help="Regex to cleanup the title", action="append"
     )
     parser.add_argument(
-        "--listen-host", help="Listen address for the HTTP server", default="localhost"
+        "--listen-host", help="Listen address for the HTTP server", default="0.0.0.0"
     )
     parser.add_argument(
         "--listen-port", help="Listen port for the HTTP server", type=int, default=8080
@@ -69,9 +69,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Whether a unique ID should be generated. Only used when --output is set.",
         action="store_true",
     )
+    parser.add_argument(
+        "--log-level",
+        help="Adjust the logging level",
+        choices=logging.getLevelNamesMapping().keys(),
+        default="INFO",
+    )
     args = parser.parse_args(argv)
     if args.cleanup_re:
         args.cleanup_re = [re.compile(r) for r in args.cleanup_re]
+    logging.getLogger().setLevel(args.log_level)
     return args
 
 
