@@ -54,11 +54,23 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # the application crashes without emitting any logs due to buffering.
 ENV PYTHONUNBUFFERED=1
 
-WORKDIR /wd
+ENV ACELIST_PORT=8080
 
+WORKDIR /wd
 COPY --from=rye /workspace/dist /wd/dist
 
+# Install cURL for the healthcheck
+RUN \
+  --mount=type=cache,target=/var/lib/apt/lists \
+  --mount=type=cache,target=/var/cache/apt/archives \
+  apt-get update \
+  && apt-get install -y --no-install-recommends curl
+
 RUN pip install --no-cache-dir /wd/dist/*.whl
-EXPOSE 8080
+EXPOSE ${ACELIST_PORT}
+
+# The healthcheck is a simple curl command that checks the status of the server.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl --fail http://localhost:${ACELIST_PORT}/docs || exit 1
 
 ENTRYPOINT [ "acelist" ]
