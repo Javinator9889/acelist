@@ -1,0 +1,37 @@
+name: Python Quick Checks
+on: [push]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./
+    name: Lint
+    steps:
+        - uses: actions/checkout@v4
+        - name: Install rye
+          uses: eifinger/setup-rye@v4
+          with:
+            github-token: ${{ secrets.GITHUB_TOKEN }}
+        - name: Sync Dependencies
+          run: rye sync
+        - name: Lint
+          run: rye lint
+
+  fmt:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./
+    name: Format
+    steps:
+        - uses: actions/checkout@v4
+        - name: Install rye
+          uses: eifinger/setup-rye@v4
+          with:
+            github-token: ${{ secrets.GITHUB_TOKEN }}
+        - name: Sync Dependencies
+          run: rye sync
+        - name: Format
+          run: rye fmt --check
